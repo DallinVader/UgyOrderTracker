@@ -1,29 +1,29 @@
 # Ugy Order Tracker
 
-Pulls today's orders from Square and shows them in a kitchen queue. Swiping an order marks it **complete on this device only** — nothing is sent back to Square.
+Pulls today's orders from Square and shows them in a kitchen queue. Swiping an order marks it **complete in Square** — it won't come back on any device.
 
 Built for GitHub Pages with a small Cloudflare Worker proxy (Square blocks direct browser API calls).
 
 ## How it works
 
 ```
-Square POS  →  Cloudflare Worker (reads orders)  →  GitHub Pages (display)
-                                                      ↓
-                                              localStorage (completed)
+Square POS  →  Cloudflare Worker  →  GitHub Pages (display)
+                      ↑
+              swipe complete (POST → Square UpdateOrder)
 ```
 
-1. Worker polls Square's Orders API for today's orders
-2. Site refreshes every 10 seconds and shows orders not yet marked complete locally
-3. Swipe down on a card to mark it complete — stored in the browser for today only
+1. Worker fetches today's orders from Square (skips orders already marked complete)
+2. Site refreshes every 10 seconds
+3. Swipe down on a card → worker updates the order in Square (`ugy_complete` metadata, state/fulfillment completed)
 
 ## Setup
 
 ### Step 1 — Square credentials
 
 1. Go to [Square Developer Dashboard](https://developer.squareup.com/apps) and create an app
-2. Under **Credentials**, copy a **Production Access Token** (or Sandbox for testing)
-3. Under **Locations**, copy your food truck **Location ID**
-4. Token needs **Orders Read** permission
+2. For sandbox: **OAuth** → authorize a test account with **ORDERS_READ** and **ORDERS_WRITE**
+3. Copy the OAuth **access token** and **Location ID** for that test account
+4. For production: use a Production access token with orders permissions
 
 ### Step 2 — Deploy the proxy
 
@@ -78,10 +78,9 @@ Open your Pages URL on a tablet at the truck.
 | Action | How |
 |--------|-----|
 | New orders appear | Automatically every ~10 seconds |
-| Mark complete | Swipe down on the order card |
-| Reset completed list | Clear site data in browser, or wait until the next day |
+| Mark complete | Swipe down — updates Square, hidden on all devices |
 
-Completed orders are keyed by date in `localStorage` under `ugy_completed_orders`. They reset automatically each day.
+Completed orders are tagged in Square with `ugy_complete` metadata and won't reappear in the queue.
 
 ## File structure
 
@@ -89,8 +88,8 @@ Completed orders are keyed by date in `localStorage` under `ugy_completed_orders
 ├── index.html
 ├── css/styles.css
 ├── js/
-│   ├── app.js           # Queue UI, swipe-to-complete, local storage
-│   ├── square-api.js    # Fetches orders from proxy
+│   ├── app.js           # Queue UI, swipe-to-complete
+│   ├── square-api.js    # Fetches orders, completes via proxy
 │   ├── config.example.js
 │   └── config.js        # Your worker URL (gitignored)
 └── worker/

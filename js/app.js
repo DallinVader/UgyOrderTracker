@@ -1,14 +1,10 @@
 'use strict';
 
-const COMPLETED_KEY = 'ugy_completed_orders';
 const SWIPE_THRESHOLD = 80;
 
 const App = (() => {
     /** @type {Map<string, object>} */
     let orders = new Map();
-
-    /** @type {Set<string>} */
-    let completed = loadCompleted();
 
     let pollTimer = null;
     let waitTimer = null;
@@ -64,8 +60,7 @@ const App = (() => {
             const fetched = await SquareApi.fetchOrders();
             hideError();
 
-            const active = fetched.filter((o) => !completed.has(o.id));
-            orders = new Map(active.map((o) => [o.id, o]));
+            orders = new Map(fetched.map((o) => [o.id, o]));
 
             render();
             setStatus('live', 'Live · updated just now');
@@ -238,15 +233,22 @@ const App = (() => {
         });
     }
 
-    function completeOrder(orderId, card) {
+    async function completeOrder(orderId, card) {
         card.classList.add('order-card--dismissing');
+        card.style.pointerEvents = 'none';
 
-        setTimeout(() => {
-            completed.add(orderId);
-            saveCompleted();
+        try {
+            await SquareApi.completeOrder(orderId);
+            hideError();
             orders.delete(orderId);
             render();
-        }, 300);
+        } catch (err) {
+            card.classList.remove('order-card--dismissing');
+            card.style.transform = '';
+            card.style.opacity = '';
+            card.style.pointerEvents = '';
+            showError(err.message || 'Failed to complete order in Square');
+        }
     }
 
     function updateWaitTimes() {
@@ -291,30 +293,6 @@ const App = (() => {
             return 'warm';
         }
         return 'hot';
-    }
-
-    function todayKey() {
-        return new Date().toISOString().slice(0, 10);
-    }
-
-    function loadCompleted() {
-        try {
-            const raw = JSON.parse(localStorage.getItem(COMPLETED_KEY) || '{}');
-            return new Set(raw[todayKey()] || []);
-        } catch {
-            return new Set();
-        }
-    }
-
-    function saveCompleted() {
-        let data = {};
-        try {
-            data = JSON.parse(localStorage.getItem(COMPLETED_KEY) || '{}');
-        } catch {
-            data = {};
-        }
-        data[todayKey()] = [...completed];
-        localStorage.setItem(COMPLETED_KEY, JSON.stringify(data));
     }
 
     function escapeHtml(text) {

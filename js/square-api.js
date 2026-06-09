@@ -9,19 +9,15 @@ const SquareApi = (() => {
         return Boolean(getConfig().ordersEndpoint);
     }
 
+    function getEndpoint() {
+        return getConfig().ordersEndpoint;
+    }
+
     /**
-     * Fetches today's orders from Square via the proxy.
-     * Completion is tracked locally only — nothing is written back to Square.
      * @returns {Promise<object[]>}
      */
     async function fetchOrders() {
-        const endpoint = getConfig().ordersEndpoint;
-
-        if (!endpoint) {
-            throw new Error('Set ordersEndpoint in js/config.js to your Square proxy URL');
-        }
-
-        const response = await fetch(endpoint);
+        const response = await fetch(getEndpoint());
 
         if (!response.ok) {
             const body = await response.json().catch(() => ({}));
@@ -29,11 +25,30 @@ const SquareApi = (() => {
         }
 
         const data = await response.json();
-        return (data.orders || []).filter((order) => order.state !== 'CANCELED');
+        return data.orders || [];
+    }
+
+    /**
+     * Marks an order complete in Square.
+     * @param {string} orderId
+     * @returns {Promise<void>}
+     */
+    async function completeOrder(orderId) {
+        const response = await fetch(getEndpoint(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderId })
+        });
+
+        if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || response.statusText);
+        }
     }
 
     return {
         fetchOrders,
+        completeOrder,
         isConfigured
     };
 })();
