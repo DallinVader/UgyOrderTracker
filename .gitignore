@@ -1,6 +1,3 @@
-# Square credentials — never commit
-js/config.js
-
 # OS
 .DS_Store
 Thumbs.db
