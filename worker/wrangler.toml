@@ -4,3 +4,7 @@ compatibility_date = "2024-01-01"
 
 [vars]
 SQUARE_SANDBOX = "true"
+
+[[kv_namespaces]]
+binding = "UGY_KV"
+id = "e21f3ae3bde04588a9d8d3eb488aeb2f"

@@ -17,7 +17,15 @@ const SquareApi = (() => {
      * @returns {Promise<object[]>}
      */
     async function fetchOrders() {
-        const response = await fetch(getEndpoint());
+        return fetchOrderList('');
+    }
+
+    async function fetchCompletedOrders() {
+        return fetchOrderList('?status=completed');
+    }
+
+    async function fetchOrderList(query) {
+        const response = await fetch(`${getEndpoint()}${query}`);
 
         if (!response.ok) {
             const body = await response.json().catch(() => ({}));
@@ -34,10 +42,18 @@ const SquareApi = (() => {
      * @returns {Promise<void>}
      */
     async function completeOrder(orderId) {
+        return postOrderAction(orderId, 'complete');
+    }
+
+    async function uncompleteOrder(orderId) {
+        return postOrderAction(orderId, 'uncomplete');
+    }
+
+    async function postOrderAction(orderId, action) {
         const response = await fetch(getEndpoint(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ orderId })
+            body: JSON.stringify({ orderId, action })
         });
 
         if (!response.ok) {
@@ -48,7 +64,9 @@ const SquareApi = (() => {
 
     return {
         fetchOrders,
+        fetchCompletedOrders,
         completeOrder,
+        uncompleteOrder,
         isConfigured
     };
 })();

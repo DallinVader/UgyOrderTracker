@@ -19,9 +19,20 @@
                 <p class="header__subtitle" id="status-text">Connecting…</p>
             </div>
         </div>
-        <div class="header__stats">
-            <span class="header__count" id="queue-count">0</span>
-            <span class="header__count-label">in queue</span>
+        <div class="header__actions">
+            <button type="button" class="header__completed-btn" id="completed-btn" aria-expanded="false">
+                Completed
+            </button>
+            <div class="header__stats-row">
+                <div class="header__stats">
+                    <span class="header__count" id="queue-count">0</span>
+                    <span class="header__count-label">in queue</span>
+                </div>
+                <div class="header__stats header__stats--completed">
+                    <span class="header__count header__count--completed" id="completed-count">0</span>
+                    <span class="header__count-label">completed</span>
+                </div>
+            </div>
         </div>
     </header>
 
@@ -40,6 +51,16 @@
             <p class="empty-state__text">New Square orders will appear here automatically.</p>
         </div>
     </main>
+
+    <div class="completed-backdrop hidden" id="completed-backdrop"></div>
+    <aside class="completed-panel hidden" id="completed-panel" aria-hidden="true">
+        <div class="completed-panel__header">
+            <h2 class="completed-panel__title">Completed today</h2>
+            <button type="button" class="completed-panel__close" id="completed-close" aria-label="Close">✕</button>
+        </div>
+        <ul class="completed-list" id="completed-list"></ul>
+        <p class="completed-empty hidden" id="completed-empty">No completed orders yet today.</p>
+    </aside>
 
     <footer class="footer">
         <p>Swipe down to mark an order complete in Square</p>
