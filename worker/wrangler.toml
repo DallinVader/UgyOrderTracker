@@ -1,0 +1,7 @@
+name = "ugy-order-proxy"
+main = "square-proxy.js"
+compatibility_date = "2024-01-01"
+
+# Set SQUARE_SANDBOX = "true" for sandbox, omit or "false" for production
+# [vars]
+# SQUARE_SANDBOX = "true"
