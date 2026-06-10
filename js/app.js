@@ -24,6 +24,10 @@ const App = (() => {
         logoutBtn: null,
         locationScreen: null,
         locationList: null,
+        loginBackdrop: null,
+        loginPending: null,
+        headerStats: null,
+        appFooter: null,
         completedBtn: null,
         completedPanel: null,
         completedBackdrop: null,
@@ -47,6 +51,10 @@ const App = (() => {
         els.logoutBtn = document.getElementById('logout-btn');
         els.locationScreen = document.getElementById('location-screen');
         els.locationList = document.getElementById('location-list');
+        els.loginBackdrop = document.getElementById('login-backdrop');
+        els.loginPending = document.getElementById('login-pending');
+        els.headerStats = document.getElementById('header-stats');
+        els.appFooter = document.getElementById('app-footer');
         els.completedBtn = document.getElementById('completed-btn');
         els.completedPanel = document.getElementById('completed-panel');
         els.completedBackdrop = document.getElementById('completed-backdrop');
@@ -57,7 +65,7 @@ const App = (() => {
         els.completedBtn.addEventListener('click', openCompletedPanel);
         els.completedClose.addEventListener('click', closeCompletedPanel);
         els.completedBackdrop.addEventListener('click', closeCompletedPanel);
-        els.loginBtn.addEventListener('click', () => Auth.login());
+        els.loginBtn.addEventListener('click', handleLogin);
         els.logoutBtn.addEventListener('click', handleLogout);
 
         showSetupBannerIfNeeded();
@@ -71,13 +79,39 @@ const App = (() => {
         bootstrap();
     }
 
+    function showSetupBannerIfNeeded() {
+        els.setupBanner.classList.toggle('hidden', SquareApi.isConfigured());
+        const sandboxHint = document.getElementById('sandbox-hint');
+        if (sandboxHint) {
+            sandboxHint.classList.toggle('hidden', !window.SQUARE_CONFIG?.sandboxMode);
+        }
+    }
+
+    async function handleLogin() {
+        els.loginBtn.disabled = true;
+        setLoginPending(true);
+        hideError();
+
+        try {
+            await Auth.login();
+            await bootstrap();
+        } catch (err) {
+            if (err.message !== 'Login cancelled') {
+                showError(err.message || 'Login failed');
+            }
+        } finally {
+            setLoginPending(false);
+            els.loginBtn.disabled = false;
+        }
+    }
+
+    function setLoginPending(visible) {
+        els.loginBackdrop?.classList.toggle('hidden', !visible);
+        els.loginPending?.classList.toggle('hidden', !visible);
+    }
+
     async function bootstrap() {
         if (!Auth.isLoggedIn()) {
-            const legacyOk = await tryLegacyAccess();
-            if (legacyOk) {
-                startApp('');
-                return;
-            }
             showLoginScreen();
             return;
         }
@@ -99,25 +133,14 @@ const App = (() => {
         }
     }
 
-    async function tryLegacyAccess() {
-        try {
-            const response = await fetch(window.SQUARE_CONFIG.ordersEndpoint);
-            if (!response.ok) {
-                return false;
-            }
-            const data = await response.json();
-            return Array.isArray(data.orders);
-        } catch {
-            return false;
-        }
-    }
-
     function showLoginScreen() {
         stopApp();
         els.loginScreen.classList.remove('hidden');
         els.locationScreen.classList.add('hidden');
         els.logoutBtn.classList.add('hidden');
         els.completedBtn.classList.add('hidden');
+        els.headerStats?.classList.add('hidden');
+        els.appFooter?.classList.add('hidden');
         els.orderList.classList.add('hidden');
         els.emptyState.classList.add('hidden');
         setStatus('', 'Sign in to view orders');
@@ -176,6 +199,8 @@ const App = (() => {
         els.locationScreen.classList.add('hidden');
         els.logoutBtn.classList.remove('hidden');
         els.completedBtn.classList.remove('hidden');
+        els.headerStats?.classList.remove('hidden');
+        els.appFooter?.classList.remove('hidden');
         els.orderList.classList.remove('hidden');
         hideError();
 
@@ -210,10 +235,6 @@ const App = (() => {
             return true;
         }
         return false;
-    }
-
-    function showSetupBannerIfNeeded() {
-        els.setupBanner.classList.toggle('hidden', SquareApi.isConfigured());
     }
 
     function startPolling() {

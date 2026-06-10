@@ -20,16 +20,18 @@ Square POS  →  Cloudflare Worker  →  GitHub Pages (display)
 
 ## Setup
 
-### Step 1 — Square OAuth app
+### Step 1 — Square OAuth app (Production)
 
 1. Go to [Square Developer Dashboard](https://developer.squareup.com/apps) and open your app
-2. **OAuth** → add redirect URL:
+2. Switch to **Production** (top of page, not Sandbox)
+3. **OAuth** → add **Production** redirect URL:
    ```
    https://ugy-order-proxy.ugy.workers.dev/auth/callback
    ```
-   (Use your worker URL after deploy — must match exactly.)
-3. Note your **Application ID** and **Application secret** (OAuth page)
-4. For sandbox testing, use the Sandbox toggle in the dashboard
+   (Use your worker URL — must match exactly, HTTPS required.)
+4. Copy your **Production Application ID** (`sq0idp-...`) and **Application secret**
+
+For sandbox testing only, set `SQUARE_SANDBOX = "true"` in `worker/wrangler.toml` and use Sandbox credentials instead.
 
 ### Step 2 — Deploy the proxy
 
@@ -41,12 +43,9 @@ npx wrangler secret put SQUARE_APPLICATION_ID
 npx wrangler secret put SQUARE_APPLICATION_SECRET
 ```
 
-For **sandbox** testing, set in `wrangler.toml` (already default):
+Use your **Production** Application ID and secret when prompted.
 
-```toml
-[vars]
-SQUARE_SANDBOX = "true"
-```
+`wrangler.toml` sets `SQUARE_SANDBOX = "false"` for real Square seller accounts.
 
 Deploy:
 
@@ -71,7 +70,8 @@ Edit `js/config.js`:
 ```javascript
 window.SQUARE_CONFIG = {
     ordersEndpoint: 'https://ugy-order-proxy.your-name.workers.dev',
-    pollIntervalMs: 10000
+    pollIntervalMs: 10000,
+    sandboxMode: false
 };
 ```
 

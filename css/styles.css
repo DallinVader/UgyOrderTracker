@@ -649,3 +649,62 @@ body {
     font-size: 0.875rem;
     padding: 12px 0;
 }
+
+.login-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 15, 26, 0.75);
+    z-index: 200;
+}
+
+.login-pending {
+    position: fixed;
+    inset: 0;
+    z-index: 201;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    pointer-events: none;
+}
+
+.login-pending__card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 28px 32px;
+    max-width: 360px;
+    text-align: center;
+    box-shadow: var(--shadow);
+}
+
+.login-pending__title {
+    font-size: 1.125rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.login-pending__text {
+    font-size: 0.9375rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.login-card__btn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+.login-card__hint {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin: -12px 0 20px;
+    padding: 10px 12px;
+    background: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.25);
+    text-align: left;
+}
+
+.login-card__hint a {
+    color: var(--accent);
+}

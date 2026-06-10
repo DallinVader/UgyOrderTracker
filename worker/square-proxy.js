@@ -100,18 +100,87 @@ async function authLogin(request, env, url) {
         return cors(json({ error: 'Invalid return_url' }, 400));
     }
 
+    const popup = url.searchParams.get('popup') === '1';
+    const openerOrigin = url.searchParams.get('opener_origin') || '';
+    if (popup && (!openerOrigin || !isAllowedOpenerOrigin(openerOrigin, returnUrl))) {
+        return cors(json({ error: 'Invalid opener_origin' }, 400));
+    }
+
     const state = crypto.randomUUID();
-    await env.UGY_KV.put(`oauth_state:${state}`, returnUrl, { expirationTtl: 600 });
+    await env.UGY_KV.put(
+        `oauth_state:${state}`,
+        JSON.stringify({ returnUrl, popup, openerOrigin }),
+        { expirationTtl: 600 }
+    );
+
+    const sandbox = isSandbox(env);
+    if (sandbox && url.searchParams.get('proceed') !== '1') {
+        return htmlSandboxStartPage(url, state);
+    }
 
     const base = squareBase(env);
     const params = new URLSearchParams({
         client_id: appId,
         scope: OAUTH_SCOPES,
-        session: 'false',
-        state
+        state,
+        redirect_uri: callbackUrl(request)
     });
 
+    if (!sandbox) {
+        params.set('session', 'false');
+    }
+
     return Response.redirect(`${base}/oauth2/authorize?${params}`, 302);
+}
+
+function htmlSandboxStartPage(url, state) {
+    const continueUrl = new URL(url);
+    continueUrl.searchParams.set('proceed', '1');
+
+    return new Response(
+        `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>Square Sandbox login</title></head>
+        <body style="font-family:system-ui,sans-serif;padding:1.5rem;background:#1a1a2e;color:#f0f0f5;max-width:420px;margin:0 auto;line-height:1.5">
+        <h1 style="font-size:1.25rem;margin:0 0 1rem">Square Sandbox</h1>
+        <p style="color:#9898b0;margin:0 0 1rem">Sandbox OAuth needs an active test-account session. Without it, Square shows a blank page.</p>
+        <ol style="padding-left:1.25rem;margin:0 0 1.25rem;color:#f0f0f5">
+            <li style="margin-bottom:0.5rem"><a href="https://developer.squareup.com/apps" target="_blank" rel="noopener" style="color:#ff6b35">Open Square Developer</a></li>
+            <li style="margin-bottom:0.5rem">Under <strong>Sandbox test accounts</strong>, click <strong>Open</strong> on your test seller (e.g. Dallin)</li>
+            <li style="margin-bottom:0.5rem">Leave that dashboard tab open</li>
+            <li>Return here and continue below</li>
+        </ol>
+        <p style="color:#9898b0;font-size:0.875rem;margin:0 0 1rem">Redirect URL in Square OAuth must be:<br><code style="color:#ff6b35">https://ugy-order-proxy.ugy.workers.dev/auth/callback</code></p>
+        <a href="${continueUrl.pathname}${continueUrl.search}" style="display:block;text-align:center;background:#ff6b35;color:#fff;font-weight:600;padding:14px;text-decoration:none">Continue to Square</a>
+        </body></html>`,
+        { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+    );
+}
+
+function isAllowedOpenerOrigin(openerOrigin, returnUrl) {
+    try {
+        return new URL(returnUrl).origin === openerOrigin;
+    } catch {
+        return false;
+    }
+}
+
+function parseOAuthState(raw) {
+    if (!raw) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        if (parsed.returnUrl) {
+            return {
+                returnUrl: parsed.returnUrl,
+                popup: Boolean(parsed.popup),
+                openerOrigin: parsed.openerOrigin || ''
+            };
+        }
+    } catch {
+        // legacy: state value was plain returnUrl
+    }
+    return { returnUrl: raw, popup: false, openerOrigin: '' };
 }
 
 async function authCallback(request, env, url) {
@@ -119,25 +188,30 @@ async function authCallback(request, env, url) {
     const state = url.searchParams.get('state');
     const error = url.searchParams.get('error');
 
+    const rawState = state ? await env.UGY_KV.get(`oauth_state:${state}`) : null;
+    const oauthState = parseOAuthState(rawState);
+
     if (error) {
-        return htmlErrorPage(`Square authorization failed: ${error}`);
+        if (state) {
+            await env.UGY_KV.delete(`oauth_state:${state}`);
+        }
+        return authCallbackError(`Square authorization failed: ${error}`, oauthState);
     }
 
     if (!code || !state) {
-        return htmlErrorPage('Missing authorization code.');
+        return authCallbackError('Missing authorization code.', oauthState);
     }
 
-    const returnUrl = await env.UGY_KV.get(`oauth_state:${state}`);
     await env.UGY_KV.delete(`oauth_state:${state}`);
 
-    if (!returnUrl || !isAllowedReturnUrl(returnUrl)) {
-        return htmlErrorPage('Invalid or expired login session.');
+    if (!oauthState || !isAllowedReturnUrl(oauthState.returnUrl)) {
+        return authCallbackError('Invalid or expired login session.', oauthState);
     }
 
     const appId = env.SQUARE_APPLICATION_ID?.trim();
     const appSecret = env.SQUARE_APPLICATION_SECRET?.trim();
     if (!appId || !appSecret) {
-        return htmlErrorPage('OAuth not configured on server.');
+        return authCallbackError('OAuth not configured on server.', oauthState);
     }
 
     const base = squareBase(env);
@@ -159,7 +233,7 @@ async function authCallback(request, env, url) {
     const tokenData = await tokenResponse.json();
     if (!tokenResponse.ok) {
         const detail = tokenData.message || tokenData.errors?.[0]?.detail || 'Token exchange failed';
-        return htmlErrorPage(detail);
+        return authCallbackError(detail, oauthState);
     }
 
     const locations = await fetchLocations(base, tokenData.access_token);
@@ -182,9 +256,20 @@ async function authCallback(request, env, url) {
         expirationTtl: SESSION_TTL_SECONDS
     });
 
-    const redirect = new URL(returnUrl);
+    if (oauthState.popup && oauthState.openerOrigin) {
+        return htmlPopupDonePage(sessionId, oauthState.openerOrigin, oauthState.returnUrl);
+    }
+
+    const redirect = new URL(oauthState.returnUrl);
     redirect.searchParams.set('session', sessionId);
     return Response.redirect(redirect.toString(), 302);
+}
+
+function authCallbackError(message, oauthState) {
+    if (oauthState?.popup && oauthState.openerOrigin) {
+        return htmlPopupErrorPage(message, oauthState.openerOrigin);
+    }
+    return htmlErrorPage(message);
 }
 
 async function authMe(request, env) {
@@ -643,11 +728,65 @@ function squareFetch(base, token, path, options = {}) {
 }
 
 function htmlErrorPage(message) {
+    const safe = escapeHtml(message);
     return new Response(
         `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem;background:#1a1a2e;color:#f0f0f5">
-        <h1>Login failed</h1><p>${message}</p><p><a href="/" style="color:#ff6b35">Try again</a></p></body></html>`,
+        <h1>Login failed</h1><p>${safe}</p></body></html>`,
         { status: 400, headers: { 'Content-Type': 'text/html' } }
     );
+}
+
+function htmlPopupDonePage(sessionId, openerOrigin, fallbackUrl) {
+    const payload = JSON.stringify({ type: 'ugy-auth', session: sessionId });
+    const fallback = JSON.stringify(fallbackUrl);
+    return new Response(
+        `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Signed in</title></head>
+        <body style="font-family:sans-serif;padding:2rem;background:#1a1a2e;color:#f0f0f5;text-align:center">
+        <p>Signed in successfully. This window will close…</p>
+        <script>
+        (function () {
+            var msg = ${payload};
+            var origin = ${JSON.stringify(openerOrigin)};
+            if (window.opener) {
+                window.opener.postMessage(msg, origin);
+                window.close();
+                setTimeout(function () { window.close(); }, 500);
+            } else {
+                var url = new URL(${fallback});
+                url.searchParams.set('session', msg.session);
+                window.location.replace(url.toString());
+            }
+        })();
+        </script></body></html>`,
+        { status: 200, headers: { 'Content-Type': 'text/html' } }
+    );
+}
+
+function htmlPopupErrorPage(message, openerOrigin) {
+    const payload = JSON.stringify({ type: 'ugy-auth', error: message });
+    const safe = escapeHtml(message);
+    return new Response(
+        `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Login failed</title></head>
+        <body style="font-family:sans-serif;padding:2rem;background:#1a1a2e;color:#f0f0f5;text-align:center">
+        <h1>Login failed</h1><p>${safe}</p><p>You can close this window.</p>
+        <script>
+        (function () {
+            var msg = ${payload};
+            if (window.opener) {
+                window.opener.postMessage(msg, ${JSON.stringify(openerOrigin)});
+            }
+        })();
+        </script></body></html>`,
+        { status: 400, headers: { 'Content-Type': 'text/html' } }
+    );
+}
+
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
 }
 
 function json(body, status = 200) {

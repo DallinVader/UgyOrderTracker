@@ -16,7 +16,7 @@
         <div class="header__brand">
             <div>
                 <h1 class="header__title">Ugy Order Tracker</h1>
-                <p class="header__subtitle" id="status-text">Connecting…</p>
+                <p class="header__subtitle" id="status-text">Sign in to view orders</p>
             </div>
         </div>
         <div class="header__actions">
@@ -24,7 +24,7 @@
             <button type="button" class="header__completed-btn hidden" id="completed-btn" aria-expanded="false">
                 Completed
             </button>
-            <div class="header__stats-row">
+            <div class="header__stats-row hidden" id="header-stats">
                 <div class="header__stats">
                     <span class="header__count" id="queue-count">0</span>
                     <span class="header__count-label">in queue</span>
@@ -37,11 +37,20 @@
         </div>
     </header>
 
+    <div class="login-backdrop hidden" id="login-backdrop"></div>
+    <div class="login-pending hidden" id="login-pending" role="status" aria-live="polite">
+        <div class="login-pending__card">
+            <p class="login-pending__title">Sign in with Square</p>
+            <p class="login-pending__text">Complete login in the popup window. This page will stay open.</p>
+        </div>
+    </div>
+
     <main class="main">
-        <div class="login-screen hidden" id="login-screen">
+        <div class="login-screen" id="login-screen">
             <div class="login-card">
                 <h2 class="login-card__title">Connect Square</h2>
                 <p class="login-card__text">Sign in with your Square account to view today&apos;s orders. Any seller with Orders access can use this app.</p>
+                <p class="login-card__hint hidden" id="sandbox-hint">Sandbox only: open your <a href="https://developer.squareup.com/apps" target="_blank" rel="noopener">Square test account dashboard</a> in another tab before logging in.</p>
                 <button type="button" class="login-card__btn" id="login-btn">Log in with Square</button>
             </div>
         </div>
@@ -60,7 +69,7 @@
 
         <div class="error-banner hidden" id="error-banner"></div>
 
-        <ul class="order-list" id="order-list" aria-live="polite"></ul>
+        <ul class="order-list hidden" id="order-list" aria-live="polite"></ul>
 
         <div class="empty-state hidden" id="empty-state">
             <span class="empty-state__icon">✓</span>
@@ -79,7 +88,7 @@
         <p class="completed-empty hidden" id="completed-empty">No completed orders yet today.</p>
     </aside>
 
-    <footer class="footer">
+    <footer class="footer hidden" id="app-footer">
         <p>Swipe down to mark an order complete in Square</p>
     </footer>
 

@@ -1,4 +1,5 @@
 window.SQUARE_CONFIG = {
     ordersEndpoint: 'https://ugy-order-proxy.ugy.workers.dev',
-    pollIntervalMs: 10000
+    pollIntervalMs: 10000,
+    sandboxMode: false
 };
