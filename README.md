@@ -2,28 +2,34 @@
 
 Pulls today's orders from Square and shows them in a kitchen queue. Swiping an order marks it **complete in Square** — it won't come back on any device.
 
-Built for GitHub Pages with a small Cloudflare Worker proxy (Square blocks direct browser API calls).
+Built for GitHub Pages with a Cloudflare Worker proxy (Square blocks direct browser API calls). **Any Square seller** can sign in with their own account via OAuth.
 
 ## How it works
 
 ```
 Square POS  →  Cloudflare Worker  →  GitHub Pages (display)
                       ↑
+              OAuth login + session per merchant
               swipe complete (POST → Square UpdateOrder)
 ```
 
-1. Worker fetches today's orders from Square (skips orders already marked complete)
-2. Site refreshes every 10 seconds
-3. Swipe down on a card → worker updates the order in Square (`ugy_complete` metadata, state/fulfillment completed)
+1. User clicks **Log in with Square** → OAuth → worker stores a session
+2. Worker fetches today's orders for that merchant's location
+3. Site refreshes every 10 seconds
+4. Swipe down on a card → worker updates the order in Square (`ugy_complete` metadata)
 
 ## Setup
 
-### Step 1 — Square credentials
+### Step 1 — Square OAuth app
 
-1. Go to [Square Developer Dashboard](https://developer.squareup.com/apps) and create an app
-2. For sandbox: **OAuth** → authorize a test account with **ORDERS_READ** and **ORDERS_WRITE**
-3. Copy the OAuth **access token** and **Location ID** for that test account
-4. For production: use a Production access token with orders permissions
+1. Go to [Square Developer Dashboard](https://developer.squareup.com/apps) and open your app
+2. **OAuth** → add redirect URL:
+   ```
+   https://ugy-order-proxy.ugy.workers.dev/auth/callback
+   ```
+   (Use your worker URL after deploy — must match exactly.)
+3. Note your **Application ID** and **Application secret** (OAuth page)
+4. For sandbox testing, use the Sandbox toggle in the dashboard
 
 ### Step 2 — Deploy the proxy
 
@@ -31,15 +37,15 @@ Square POS  →  Cloudflare Worker  →  GitHub Pages (display)
 cd worker
 npm install
 npx wrangler login
-npx wrangler secret put SQUARE_ACCESS_TOKEN
-npx wrangler secret put SQUARE_LOCATION_ID
+npx wrangler secret put SQUARE_APPLICATION_ID
+npx wrangler secret put SQUARE_APPLICATION_SECRET
 ```
 
-For **sandbox** testing, also run:
+For **sandbox** testing, set in `wrangler.toml` (already default):
 
-```bash
-npx wrangler secret put SQUARE_SANDBOX
-# enter: true
+```toml
+[vars]
+SQUARE_SANDBOX = "true"
 ```
 
 Deploy:
@@ -48,9 +54,11 @@ Deploy:
 npm run deploy
 ```
 
-Copy the URL it prints (e.g. `https://ugy-order-proxy.your-name.workers.dev`).
+Copy the worker URL (e.g. `https://ugy-order-proxy.your-name.workers.dev`).
 
-**Local testing:** run `npm run dev` in `worker/` and use `http://localhost:8787` as your endpoint.
+**Optional legacy mode** (single fixed account, no login UI): also set `SQUARE_ACCESS_TOKEN` and `SQUARE_LOCATION_ID` secrets. OAuth login is preferred for multi-merchant use.
+
+**Local testing:** run `npm run dev` in `worker/` and use `http://localhost:8787` as your endpoint. Add `http://localhost:8787/auth/callback` as an OAuth redirect URL in Square.
 
 ### Step 3 — Configure the site
 
@@ -71,14 +79,17 @@ window.SQUARE_CONFIG = {
 
 Push to GitHub → **Settings → Pages → Deploy from `main` branch, `/ (root)`**.
 
-Open your Pages URL on a tablet at the truck.
+Open your Pages URL, click **Log in with Square**, and authorize with Orders permissions.
 
 ## Usage
 
 | Action | How |
 |--------|-----|
+| Connect account | **Log in with Square** on first visit |
+| Multiple locations | Pick a location after login |
 | New orders appear | Automatically every ~10 seconds |
 | Mark complete | Swipe down — updates Square, hidden on all devices |
+| Log out | **Log out** in the header |
 
 Completed orders are tagged in Square with `ugy_complete` metadata and won't reappear in the queue.
 
@@ -88,12 +99,13 @@ Completed orders are tagged in Square with `ugy_complete` metadata and won't rea
 ├── index.html
 ├── css/styles.css
 ├── js/
-│   ├── app.js           # Queue UI, swipe-to-complete
+│   ├── app.js           # Queue UI, swipe-to-complete, login flow
+│   ├── auth.js          # Square OAuth session handling
 │   ├── square-api.js    # Fetches orders, completes via proxy
 │   ├── config.example.js
 │   └── config.js        # Your worker URL (gitignored)
 └── worker/
-    ├── square-proxy.js  # Square Orders API proxy
+    ├── square-proxy.js  # OAuth + Square Orders API proxy
     ├── wrangler.toml
     └── package.json
 ```

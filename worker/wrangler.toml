@@ -4,6 +4,8 @@ compatibility_date = "2024-01-01"
 
 [vars]
 SQUARE_SANDBOX = "true"
+# Public OAuth client id (not secret) — from Square Developer Dashboard → OAuth
+SQUARE_APPLICATION_ID = "sandbox-sq0idb--4fDAScIu6PuTZ7Gc95Jcw"
 
 [[kv_namespaces]]
 binding = "UGY_KV"

@@ -8,6 +8,8 @@ const App = (() => {
 
     let pollTimer = null;
     let waitTimer = null;
+    let appStarted = false;
+    let currentLocationName = '';
 
     const els = {
         orderList: null,
@@ -17,6 +19,11 @@ const App = (() => {
         emptyState: null,
         setupBanner: null,
         errorBanner: null,
+        loginScreen: null,
+        loginBtn: null,
+        logoutBtn: null,
+        locationScreen: null,
+        locationList: null,
         completedBtn: null,
         completedPanel: null,
         completedBackdrop: null,
@@ -26,6 +33,8 @@ const App = (() => {
     };
 
     function init() {
+        Auth.init();
+
         els.orderList = document.getElementById('order-list');
         els.queueCount = document.getElementById('queue-count');
         els.completedCount = document.getElementById('completed-count');
@@ -33,6 +42,11 @@ const App = (() => {
         els.emptyState = document.getElementById('empty-state');
         els.setupBanner = document.getElementById('setup-banner');
         els.errorBanner = document.getElementById('error-banner');
+        els.loginScreen = document.getElementById('login-screen');
+        els.loginBtn = document.getElementById('login-btn');
+        els.logoutBtn = document.getElementById('logout-btn');
+        els.locationScreen = document.getElementById('location-screen');
+        els.locationList = document.getElementById('location-list');
         els.completedBtn = document.getElementById('completed-btn');
         els.completedPanel = document.getElementById('completed-panel');
         els.completedBackdrop = document.getElementById('completed-backdrop');
@@ -43,17 +57,159 @@ const App = (() => {
         els.completedBtn.addEventListener('click', openCompletedPanel);
         els.completedClose.addEventListener('click', closeCompletedPanel);
         els.completedBackdrop.addEventListener('click', closeCompletedPanel);
+        els.loginBtn.addEventListener('click', () => Auth.login());
+        els.logoutBtn.addEventListener('click', handleLogout);
 
         showSetupBannerIfNeeded();
+        startWaitTimer();
 
-        if (SquareApi.isConfigured()) {
-            refresh();
-            startPolling();
-        } else {
+        if (!SquareApi.isConfigured()) {
             setStatus('error', 'Not configured');
+            return;
         }
 
-        startWaitTimer();
+        bootstrap();
+    }
+
+    async function bootstrap() {
+        if (!Auth.isLoggedIn()) {
+            const legacyOk = await tryLegacyAccess();
+            if (legacyOk) {
+                startApp('');
+                return;
+            }
+            showLoginScreen();
+            return;
+        }
+
+        try {
+            const me = await Auth.fetchMe();
+            if (me.needsLocation) {
+                await showLocationPicker();
+                return;
+            }
+            startApp(me.locationName);
+        } catch (err) {
+            if (err.needsAuth) {
+                showLoginScreen();
+                return;
+            }
+            setStatus('error', err.message || 'Failed to connect');
+            showError(err.message || 'Failed to connect');
+        }
+    }
+
+    async function tryLegacyAccess() {
+        try {
+            const response = await fetch(window.SQUARE_CONFIG.ordersEndpoint);
+            if (!response.ok) {
+                return false;
+            }
+            const data = await response.json();
+            return Array.isArray(data.orders);
+        } catch {
+            return false;
+        }
+    }
+
+    function showLoginScreen() {
+        stopApp();
+        els.loginScreen.classList.remove('hidden');
+        els.locationScreen.classList.add('hidden');
+        els.logoutBtn.classList.add('hidden');
+        els.completedBtn.classList.add('hidden');
+        els.orderList.classList.add('hidden');
+        els.emptyState.classList.add('hidden');
+        setStatus('', 'Sign in to view orders');
+    }
+
+    async function showLocationPicker() {
+        stopApp();
+        els.loginScreen.classList.add('hidden');
+        els.locationScreen.classList.remove('hidden');
+        els.locationList.innerHTML = '<li class="location-loading">Loading locations…</li>';
+
+        try {
+            const locations = await Auth.fetchLocations();
+            els.locationList.innerHTML = '';
+
+            if (locations.length === 0) {
+                els.locationList.innerHTML = '<li class="location-empty">No active Square locations found.</li>';
+                return;
+            }
+
+            locations.forEach((loc) => {
+                const li = document.createElement('li');
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'location-list__btn';
+                btn.innerHTML = `
+                    <span class="location-list__name">${escapeHtml(loc.name)}</span>
+                    ${loc.address ? `<span class="location-list__address">${escapeHtml(loc.address)}</span>` : ''}
+                `;
+                btn.addEventListener('click', () => selectLocation(loc.id, loc.name));
+                li.appendChild(btn);
+                els.locationList.appendChild(li);
+            });
+        } catch (err) {
+            if (err.needsAuth) {
+                showLoginScreen();
+                return;
+            }
+            els.locationList.innerHTML = `<li class="location-empty">${escapeHtml(err.message || 'Failed to load locations')}</li>`;
+        }
+    }
+
+    async function selectLocation(locationId, locationName) {
+        try {
+            await Auth.setLocation(locationId);
+            startApp(locationName);
+        } catch (err) {
+            showError(err.message || 'Failed to select location');
+        }
+    }
+
+    function startApp(locationName) {
+        appStarted = true;
+        currentLocationName = locationName || '';
+        els.loginScreen.classList.add('hidden');
+        els.locationScreen.classList.add('hidden');
+        els.logoutBtn.classList.remove('hidden');
+        els.completedBtn.classList.remove('hidden');
+        els.orderList.classList.remove('hidden');
+        hideError();
+
+        const label = locationName ? `Live · ${locationName}` : 'Live';
+        setStatus('live', label);
+
+        refresh();
+        startPolling();
+    }
+
+    function stopApp() {
+        appStarted = false;
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+    }
+
+    async function handleLogout() {
+        stopApp();
+        await Auth.logout();
+        showLoginScreen();
+    }
+
+    function handleApiError(err) {
+        if (err.needsAuth) {
+            showLoginScreen();
+            return true;
+        }
+        if (err.needsLocation) {
+            showLocationPicker();
+            return true;
+        }
+        return false;
     }
 
     function showSetupBannerIfNeeded() {
@@ -61,6 +217,9 @@ const App = (() => {
     }
 
     function startPolling() {
+        if (pollTimer) {
+            clearInterval(pollTimer);
+        }
         const interval = window.SQUARE_CONFIG?.pollIntervalMs || 10000;
         pollTimer = setInterval(refresh, interval);
     }
@@ -70,7 +229,7 @@ const App = (() => {
     }
 
     async function refresh() {
-        if (!SquareApi.isConfigured()) {
+        if (!SquareApi.isConfigured() || !appStarted) {
             return;
         }
 
@@ -85,8 +244,12 @@ const App = (() => {
             els.completedCount.textContent = String(completed.length);
 
             render();
-            setStatus('live', 'Live · updated just now');
+            const suffix = currentLocationName ? ` · ${currentLocationName}` : '';
+            setStatus('live', `Live · updated just now${suffix}`);
         } catch (err) {
+            if (handleApiError(err)) {
+                return;
+            }
             setStatus('error', err.message || 'Failed to load orders');
             showError(err.message || 'Failed to load orders');
         }
@@ -270,6 +433,9 @@ const App = (() => {
             card.style.transform = '';
             card.style.opacity = '';
             card.style.pointerEvents = '';
+            if (handleApiError(err)) {
+                return;
+            }
             showError(err.message || 'Failed to complete order in Square');
         }
     }
@@ -347,6 +513,10 @@ const App = (() => {
             renderCompletedList(completed);
         } catch (err) {
             els.completedList.innerHTML = '';
+            if (handleApiError(err)) {
+                closeCompletedPanel();
+                return;
+            }
             els.completedEmpty.textContent = err.message || 'Failed to load completed orders';
             els.completedEmpty.classList.remove('hidden');
         }
@@ -421,6 +591,10 @@ const App = (() => {
         } catch (err) {
             btn.disabled = false;
             btn.textContent = 'Uncomplete';
+            if (handleApiError(err)) {
+                closeCompletedPanel();
+                return;
+            }
             showError(err.message || 'Failed to restore order');
         }
     }

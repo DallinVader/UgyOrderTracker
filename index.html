@@ -20,7 +20,8 @@
             </div>
         </div>
         <div class="header__actions">
-            <button type="button" class="header__completed-btn" id="completed-btn" aria-expanded="false">
+            <button type="button" class="header__logout-btn hidden" id="logout-btn">Log out</button>
+            <button type="button" class="header__completed-btn hidden" id="completed-btn" aria-expanded="false">
                 Completed
             </button>
             <div class="header__stats-row">
@@ -37,6 +38,22 @@
     </header>
 
     <main class="main">
+        <div class="login-screen hidden" id="login-screen">
+            <div class="login-card">
+                <h2 class="login-card__title">Connect Square</h2>
+                <p class="login-card__text">Sign in with your Square account to view today&apos;s orders. Any seller with Orders access can use this app.</p>
+                <button type="button" class="login-card__btn" id="login-btn">Log in with Square</button>
+            </div>
+        </div>
+
+        <div class="location-screen hidden" id="location-screen">
+            <div class="login-card">
+                <h2 class="login-card__title">Choose location</h2>
+                <p class="login-card__text">Select which Square location to track.</p>
+                <ul class="location-list" id="location-list"></ul>
+            </div>
+        </div>
+
         <div class="setup-banner hidden" id="setup-banner">
             <p><strong>Setup required.</strong> Deploy the Square proxy in <code>worker/</code>, then set <code>ordersEndpoint</code> in <code>js/config.js</code>. See README for steps.</p>
         </div>
@@ -67,6 +84,7 @@
     </footer>
 
     <script src="js/config.js"></script>
+    <script src="js/auth.js"></script>
     <script src="js/square-api.js"></script>
     <script src="js/app.js"></script>
 </body>

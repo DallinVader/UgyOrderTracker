@@ -13,6 +13,17 @@ const SquareApi = (() => {
         return getConfig().ordersEndpoint;
     }
 
+    function parseErrorResponse(response, body) {
+        const err = new Error(body.error || response.statusText);
+        if (response.status === 401) {
+            err.needsAuth = true;
+        }
+        if (body.needsLocation) {
+            err.needsLocation = true;
+        }
+        return err;
+    }
+
     /**
      * @returns {Promise<object[]>}
      */
@@ -25,15 +36,17 @@ const SquareApi = (() => {
     }
 
     async function fetchOrderList(query) {
-        const response = await fetch(`${getEndpoint()}${query}`);
+        const response = await fetch(`${getEndpoint()}${query}`, {
+            headers: Auth.authHeaders()
+        });
+
+        const body = await response.json().catch(() => ({}));
 
         if (!response.ok) {
-            const body = await response.json().catch(() => ({}));
-            throw new Error(body.error || response.statusText);
+            throw parseErrorResponse(response, body);
         }
 
-        const data = await response.json();
-        return data.orders || [];
+        return body.orders || [];
     }
 
     /**
@@ -52,13 +65,14 @@ const SquareApi = (() => {
     async function postOrderAction(orderId, action) {
         const response = await fetch(getEndpoint(), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: Auth.authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ orderId, action })
         });
 
+        const body = await response.json().catch(() => ({}));
+
         if (!response.ok) {
-            const body = await response.json().catch(() => ({}));
-            throw new Error(body.error || response.statusText);
+            throw parseErrorResponse(response, body);
         }
     }
 
