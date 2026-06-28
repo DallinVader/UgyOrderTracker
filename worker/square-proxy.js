@@ -368,8 +368,7 @@ async function handleOrdersRoute(request, env, url) {
     }
 
     if (request.method === 'GET') {
-        const showCompleted = url.searchParams.get('status') === 'completed';
-        return handleListOrders(env, base, token, locationId, merchantId, showCompleted);
+        return handleListOrders(env, base, token, locationId, merchantId);
     }
 
     if (request.method === 'POST') {
@@ -492,29 +491,44 @@ function todayKey() {
     return new Date().toISOString().slice(0, 10);
 }
 
-function kvCompletedKey(merchantId, orderId) {
-    return `c:${merchantId}:${todayKey()}:${orderId}`;
+// All per-order overrides for a merchant/day live in ONE KV entry so a list
+// request costs a single read instead of two reads per order.
+function overridesKey(merchantId) {
+    return `ov:${merchantId}:${todayKey()}`;
 }
 
-function kvActiveKey(merchantId, orderId) {
-    return `a:${merchantId}:${todayKey()}:${orderId}`;
+async function getOverrides(env, merchantId) {
+    const raw = await env.UGY_KV.get(overridesKey(merchantId));
+    if (!raw) {
+        return { c: {}, a: {} };
+    }
+    try {
+        const parsed = JSON.parse(raw);
+        return { c: parsed.c || {}, a: parsed.a || {} };
+    } catch {
+        return { c: {}, a: {} };
+    }
 }
 
-async function isOrderCompleted(env, merchantId, order) {
-    const forcedActive = await env.UGY_KV.get(kvActiveKey(merchantId, order.id));
-    if (forcedActive) {
+async function saveOverrides(env, merchantId, overrides) {
+    await env.UGY_KV.put(overridesKey(merchantId), JSON.stringify(overrides), {
+        expirationTtl: 60 * 60 * 48
+    });
+}
+
+function isOrderCompleted(overrides, order) {
+    if (overrides.a[order.id]) {
         return false;
     }
-
-    const kvCompleted = await env.UGY_KV.get(kvCompletedKey(merchantId, order.id));
-    if (kvCompleted) {
+    if (overrides.c[order.id]) {
         return true;
     }
-
     return order.metadata?.[COMPLETE_FLAG] === 'true';
 }
 
-async function handleListOrders(env, base, token, locationId, merchantId, completedOnly = false) {
+// Returns both active and completed buckets from a single Square search and a
+// single KV read, so one poll = one Square call + one KV read total.
+async function handleListOrders(env, base, token, locationId, merchantId) {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
@@ -529,10 +543,7 @@ async function handleListOrders(env, base, token, locationId, merchantId, comple
                         created_at: { start_at: startOfDay.toISOString() }
                     }
                 },
-                sort: {
-                    sort_field: completedOnly ? 'UPDATED_AT' : 'CREATED_AT',
-                    sort_order: completedOnly ? 'DESC' : 'ASC'
-                }
+                sort: { sort_field: 'CREATED_AT', sort_order: 'ASC' }
             },
             limit: 100
         })
@@ -544,17 +555,25 @@ async function handleListOrders(env, base, token, locationId, merchantId, comple
         return cors(json({ error: formatSquareError(squareResponse.status, data) }, squareResponse.status));
     }
 
-    const rawOrders = (data.orders || []).filter((order) => order.state !== 'CANCELED');
-    const filtered = [];
+    const overrides = await getOverrides(env, merchantId);
+    const active = [];
+    const completed = [];
 
-    for (const order of rawOrders) {
-        const completed = await isOrderCompleted(env, merchantId, order);
-        if (completedOnly ? completed : !completed) {
-            filtered.push(normalizeOrder(order, completedOnly));
+    for (const order of data.orders || []) {
+        if (order.state === 'CANCELED') {
+            continue;
+        }
+        if (isOrderCompleted(overrides, order)) {
+            completed.push(normalizeOrder(order, true));
+        } else {
+            active.push(normalizeOrder(order, false));
         }
     }
 
-    return cors(json({ orders: filtered }));
+    active.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    completed.sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+
+    return cors(json({ active, completed }));
 }
 
 async function handleOrderAction(request, env, base, token, locationId, merchantId) {
@@ -607,11 +626,6 @@ async function handleOrderAction(request, env, base, token, locationId, merchant
     }
 
     await clearKvOverrides(env, merchantId, orderId);
-    if (action === 'complete') {
-        await env.UGY_KV.delete(kvActiveKey(merchantId, orderId));
-    } else {
-        await env.UGY_KV.delete(kvCompletedKey(merchantId, orderId));
-    }
 
     return cors(json({ success: true, orderId, action }));
 }
@@ -622,18 +636,31 @@ function isImmutableOrderError(data) {
 }
 
 async function applyKvFallback(env, merchantId, orderId, action) {
+    const overrides = await getOverrides(env, merchantId);
     if (action === 'complete') {
-        await env.UGY_KV.put(kvCompletedKey(merchantId, orderId), '1');
-        await env.UGY_KV.delete(kvActiveKey(merchantId, orderId));
+        overrides.c[orderId] = 1;
+        delete overrides.a[orderId];
     } else {
-        await env.UGY_KV.put(kvActiveKey(merchantId, orderId), '1');
-        await env.UGY_KV.delete(kvCompletedKey(merchantId, orderId));
+        overrides.a[orderId] = 1;
+        delete overrides.c[orderId];
     }
+    await saveOverrides(env, merchantId, overrides);
 }
 
 async function clearKvOverrides(env, merchantId, orderId) {
-    await env.UGY_KV.delete(kvCompletedKey(merchantId, orderId));
-    await env.UGY_KV.delete(kvActiveKey(merchantId, orderId));
+    const overrides = await getOverrides(env, merchantId);
+    let changed = false;
+    if (overrides.c[orderId]) {
+        delete overrides.c[orderId];
+        changed = true;
+    }
+    if (overrides.a[orderId]) {
+        delete overrides.a[orderId];
+        changed = true;
+    }
+    if (changed) {
+        await saveOverrides(env, merchantId, overrides);
+    }
 }
 
 function buildCompletePayload(order, locationId) {

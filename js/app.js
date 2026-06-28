@@ -5,6 +5,8 @@ const SWIPE_THRESHOLD = 80;
 const App = (() => {
     /** @type {Map<string, object>} */
     let orders = new Map();
+    /** @type {object[]} */
+    let completedOrders = [];
 
     let pollTimer = null;
     let waitTimer = null;
@@ -67,6 +69,7 @@ const App = (() => {
         els.completedBackdrop.addEventListener('click', closeCompletedPanel);
         els.loginBtn.addEventListener('click', handleLogin);
         els.logoutBtn.addEventListener('click', handleLogout);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
 
         showSetupBannerIfNeeded();
         startWaitTimer();
@@ -245,6 +248,23 @@ const App = (() => {
         pollTimer = setInterval(refresh, interval);
     }
 
+    // Pause polling while the tab/screen is hidden to avoid burning API/KV quota
+    // when nobody is looking. Resume with an immediate refresh when visible again.
+    function handleVisibilityChange() {
+        if (!appStarted) {
+            return;
+        }
+        if (document.hidden) {
+            if (pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+            }
+        } else {
+            refresh();
+            startPolling();
+        }
+    }
+
     function startWaitTimer() {
         waitTimer = setInterval(updateWaitTimes, 1000);
     }
@@ -255,16 +275,17 @@ const App = (() => {
         }
 
         try {
-            const [fetched, completed] = await Promise.all([
-                SquareApi.fetchOrders(),
-                SquareApi.fetchCompletedOrders()
-            ]);
+            const { active, completed } = await SquareApi.fetchOrders();
             hideError();
 
-            orders = new Map(fetched.map((o) => [o.id, o]));
+            orders = new Map(active.map((o) => [o.id, o]));
+            completedOrders = completed;
             els.completedCount.textContent = String(completed.length);
 
             render();
+            if (isCompletedPanelOpen()) {
+                renderCompletedList(completedOrders);
+            }
             const suffix = currentLocationName ? ` · ${currentLocationName}` : '';
             setStatus('live', `Live · updated just now${suffix}`);
         } catch (err) {
@@ -446,9 +467,17 @@ const App = (() => {
         try {
             await SquareApi.completeOrder(orderId);
             hideError();
+
+            const order = orders.get(orderId);
             orders.delete(orderId);
+            if (order) {
+                completedOrders.unshift({ ...order, completedAt: new Date().toISOString() });
+                els.completedCount.textContent = String(completedOrders.length);
+                if (isCompletedPanelOpen()) {
+                    renderCompletedList(completedOrders);
+                }
+            }
             render();
-            await updateCompletedCount();
         } catch (err) {
             card.classList.remove('order-card--dismissing');
             card.style.transform = '';
@@ -511,35 +540,22 @@ const App = (() => {
         return div.innerHTML;
     }
 
-    async function updateCompletedCount() {
-        try {
-            const completed = await SquareApi.fetchCompletedOrders();
-            els.completedCount.textContent = String(completed.length);
-        } catch {
-            // keep previous count on failure
-        }
+    function isCompletedPanelOpen() {
+        return !els.completedPanel.classList.contains('hidden');
     }
 
-    async function openCompletedPanel() {
+    function openCompletedPanel() {
         els.completedPanel.classList.remove('hidden');
         els.completedBackdrop.classList.remove('hidden');
         els.completedPanel.setAttribute('aria-hidden', 'false');
         els.completedBtn.setAttribute('aria-expanded', 'true');
-        els.completedList.innerHTML = '<li class="completed-loading">Loading…</li>';
-        els.completedEmpty.classList.add('hidden');
 
-        try {
-            const completed = await SquareApi.fetchCompletedOrders();
-            els.completedCount.textContent = String(completed.length);
-            renderCompletedList(completed);
-        } catch (err) {
-            els.completedList.innerHTML = '';
-            if (handleApiError(err)) {
-                closeCompletedPanel();
-                return;
-            }
-            els.completedEmpty.textContent = err.message || 'Failed to load completed orders';
-            els.completedEmpty.classList.remove('hidden');
+        // Render instantly from the last poll's cache, then refresh in the
+        // background so opening the panel costs no extra request on its own.
+        renderCompletedList(completedOrders);
+        els.completedCount.textContent = String(completedOrders.length);
+        if (appStarted) {
+            refresh();
         }
     }
 

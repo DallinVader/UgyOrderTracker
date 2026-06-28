@@ -25,18 +25,11 @@ const SquareApi = (() => {
     }
 
     /**
-     * @returns {Promise<object[]>}
+     * Fetches active and completed orders in a single request.
+     * @returns {Promise<{active: object[], completed: object[]}>}
      */
     async function fetchOrders() {
-        return fetchOrderList('');
-    }
-
-    async function fetchCompletedOrders() {
-        return fetchOrderList('?status=completed');
-    }
-
-    async function fetchOrderList(query) {
-        const response = await fetch(`${getEndpoint()}${query}`, {
+        const response = await fetch(getEndpoint(), {
             headers: Auth.authHeaders()
         });
 
@@ -46,7 +39,10 @@ const SquareApi = (() => {
             throw parseErrorResponse(response, body);
         }
 
-        return body.orders || [];
+        return {
+            active: body.active || [],
+            completed: body.completed || []
+        };
     }
 
     /**
@@ -78,7 +74,6 @@ const SquareApi = (() => {
 
     return {
         fetchOrders,
-        fetchCompletedOrders,
         completeOrder,
         uncompleteOrder,
         isConfigured
