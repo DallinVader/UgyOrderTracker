@@ -10,7 +10,7 @@ window.SQUARE_CONFIG = {
     ordersEndpoint: '',
 
     /** How often to pull new orders from Square (milliseconds) */
-    pollIntervalMs: 10000,
+    pollIntervalMs: 15000,
 
     /** Show sandbox login hint (set true only for sandbox testing) */
     sandboxMode: false
