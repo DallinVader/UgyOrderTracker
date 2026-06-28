@@ -25,10 +25,11 @@ const SquareApi = (() => {
     }
 
     /**
-     * Fetches active and completed orders in a single request.
-     * @returns {Promise<{active: object[], completed: object[]}>}
+     * Poll payload: active orders plus a completed count only (kept small so
+     * the 10s poll doesn't re-send the whole day's completed list each time).
+     * @returns {Promise<{active: object[], completedCount: number}>}
      */
-    async function fetchOrders() {
+    async function fetchActive() {
         const response = await fetch(getEndpoint(), {
             headers: Auth.authHeaders()
         });
@@ -41,8 +42,27 @@ const SquareApi = (() => {
 
         return {
             active: body.active || [],
-            completed: body.completed || []
+            completedCount: body.completedCount || 0
         };
+    }
+
+    /**
+     * Full completed list — fetched on demand (when the panel opens), not on
+     * every poll.
+     * @returns {Promise<object[]>}
+     */
+    async function fetchCompleted() {
+        const response = await fetch(`${getEndpoint()}?view=completed`, {
+            headers: Auth.authHeaders()
+        });
+
+        const body = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+            throw parseErrorResponse(response, body);
+        }
+
+        return body.completed || [];
     }
 
     /**
@@ -73,7 +93,8 @@ const SquareApi = (() => {
     }
 
     return {
-        fetchOrders,
+        fetchActive,
+        fetchCompleted,
         completeOrder,
         uncompleteOrder,
         isConfigured

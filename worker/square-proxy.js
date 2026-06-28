@@ -368,7 +368,8 @@ async function handleOrdersRoute(request, env, url) {
     }
 
     if (request.method === 'GET') {
-        return handleListOrders(env, base, token, locationId, merchantId);
+        const view = url.searchParams.get('view');
+        return handleListOrders(env, base, token, locationId, merchantId, view);
     }
 
     if (request.method === 'POST') {
@@ -526,9 +527,10 @@ function isOrderCompleted(overrides, order) {
     return order.metadata?.[COMPLETE_FLAG] === 'true';
 }
 
-// Returns both active and completed buckets from a single Square search and a
-// single KV read, so one poll = one Square call + one KV read total.
-async function handleListOrders(env, base, token, locationId, merchantId) {
+// Default (poll) response is active orders + a completed count only, so the
+// frequent 10s poll stays tiny. The full completed list is sent only when
+// requested with ?view=completed (i.e. when the panel is opened).
+async function handleListOrders(env, base, token, locationId, merchantId, view) {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
@@ -570,10 +572,13 @@ async function handleListOrders(env, base, token, locationId, merchantId) {
         }
     }
 
-    active.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    completed.sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+    if (view === 'completed') {
+        completed.sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+        return cors(json({ completed }));
+    }
 
-    return cors(json({ active, completed }));
+    active.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    return cors(json({ active, completedCount: completed.length }));
 }
 
 async function handleOrderAction(request, env, base, token, locationId, merchantId) {
@@ -828,5 +833,6 @@ function cors(response) {
     headers.set('Access-Control-Allow-Origin', '*');
     headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    headers.set('Access-Control-Max-Age', '86400');
     return new Response(response.body, { status: response.status, headers });
 }

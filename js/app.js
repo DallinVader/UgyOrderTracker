@@ -5,8 +5,9 @@ const SWIPE_THRESHOLD = 80;
 const App = (() => {
     /** @type {Map<string, object>} */
     let orders = new Map();
-    /** @type {object[]} */
+    /** @type {object[]} Full completed list, loaded only while the panel is open. */
     let completedOrders = [];
+    let completedCount = 0;
 
     let pollTimer = null;
     let waitTimer = null;
@@ -275,17 +276,21 @@ const App = (() => {
         }
 
         try {
-            const { active, completed } = await SquareApi.fetchOrders();
+            const { active, completedCount: count } = await SquareApi.fetchActive();
             hideError();
 
             orders = new Map(active.map((o) => [o.id, o]));
-            completedOrders = completed;
-            els.completedCount.textContent = String(completed.length);
+            setCompletedCount(count);
 
             render();
+
+            // Only pull the full completed list while the panel is actually open.
             if (isCompletedPanelOpen()) {
+                completedOrders = await SquareApi.fetchCompleted();
+                setCompletedCount(completedOrders.length);
                 renderCompletedList(completedOrders);
             }
+
             const suffix = currentLocationName ? ` · ${currentLocationName}` : '';
             setStatus('live', `Live · updated just now${suffix}`);
         } catch (err) {
@@ -295,6 +300,11 @@ const App = (() => {
             setStatus('error', err.message || 'Failed to load orders');
             showError(err.message || 'Failed to load orders');
         }
+    }
+
+    function setCompletedCount(count) {
+        completedCount = count;
+        els.completedCount.textContent = String(count);
     }
 
     function setStatus(type, text) {
@@ -470,12 +480,10 @@ const App = (() => {
 
             const order = orders.get(orderId);
             orders.delete(orderId);
-            if (order) {
+            setCompletedCount(completedCount + 1);
+            if (order && isCompletedPanelOpen()) {
                 completedOrders.unshift({ ...order, completedAt: new Date().toISOString() });
-                els.completedCount.textContent = String(completedOrders.length);
-                if (isCompletedPanelOpen()) {
-                    renderCompletedList(completedOrders);
-                }
+                renderCompletedList(completedOrders);
             }
             render();
         } catch (err) {
@@ -544,18 +552,26 @@ const App = (() => {
         return !els.completedPanel.classList.contains('hidden');
     }
 
-    function openCompletedPanel() {
+    async function openCompletedPanel() {
         els.completedPanel.classList.remove('hidden');
         els.completedBackdrop.classList.remove('hidden');
         els.completedPanel.setAttribute('aria-hidden', 'false');
         els.completedBtn.setAttribute('aria-expanded', 'true');
+        els.completedList.innerHTML = '<li class="completed-loading">Loading…</li>';
+        els.completedEmpty.classList.add('hidden');
 
-        // Render instantly from the last poll's cache, then refresh in the
-        // background so opening the panel costs no extra request on its own.
-        renderCompletedList(completedOrders);
-        els.completedCount.textContent = String(completedOrders.length);
-        if (appStarted) {
-            refresh();
+        try {
+            completedOrders = await SquareApi.fetchCompleted();
+            setCompletedCount(completedOrders.length);
+            renderCompletedList(completedOrders);
+        } catch (err) {
+            els.completedList.innerHTML = '';
+            if (handleApiError(err)) {
+                closeCompletedPanel();
+                return;
+            }
+            els.completedEmpty.textContent = err.message || 'Failed to load completed orders';
+            els.completedEmpty.classList.remove('hidden');
         }
     }
 
